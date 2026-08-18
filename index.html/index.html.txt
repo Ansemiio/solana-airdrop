@@ -14,7 +14,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>Claim $MEME Airdrop</h1>
+        <h1>Claim SOLANA Airdrop</h1>
         <p>Connect wallet to receive your tokens.</p>
         <button id="claimBtn">Connect & Claim</button>
         <div id="status"></div>
